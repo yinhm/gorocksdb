@@ -34,40 +34,72 @@ func TestCustomSliceTransform(t *testing.T) {
 	Convey("Subject: Prefix filtering with custom slice transform", t, func() {
 		sliceTransform := &testSliceTransform{}
 
-		options := NewDefaultOptions()
-		DestroyDb(dbName, options)
+		Convey("The old Iteration", func() {
+			options := NewDefaultOptions()
+			DestroyDb(dbName, options)
 
-		options.SetPrefixExtractor(sliceTransform)
-		options.SetHashSkipListRep(50000, 4, 4)
-		options.SetAllowMmapReads(true)
-		options.SetAllowMmapWrites(true)
-		options.SetPlainTableFactory(4, 10, 0.75, 16)
-		options.SetCreateIfMissing(true)
+			options.SetPrefixExtractor(sliceTransform)
+			options.SetHashSkipListRep(50000, 4, 4)
+			options.SetAllowMmapReads(true)
+			options.SetAllowMmapWrites(true)
+			options.SetPlainTableFactory(4, 10, 0.75, 16)
+			options.SetCreateIfMissing(true)
 
-		db, err := OpenDb(options, dbName)
-		defer db.Close()
+			db, err := OpenDb(options, dbName)
+			defer db.Close()
 
-		So(err, ShouldBeNil)
+			So(err, ShouldBeNil)
 
-		wo := NewDefaultWriteOptions()
-		So(db.Put(wo, []byte("foo1"), []byte("foo")), ShouldBeNil)
-		So(db.Put(wo, []byte("foo2"), []byte("foo")), ShouldBeNil)
-		So(db.Put(wo, []byte("foo3"), []byte("foo")), ShouldBeNil)
-		So(db.Put(wo, []byte("bar1"), []byte("bar")), ShouldBeNil)
-		So(db.Put(wo, []byte("bar2"), []byte("bar")), ShouldBeNil)
-		So(db.Put(wo, []byte("bar3"), []byte("bar")), ShouldBeNil)
+			wo := NewDefaultWriteOptions()
+			So(db.Put(wo, []byte("foo1"), []byte("foo")), ShouldBeNil)
+			So(db.Put(wo, []byte("foo2"), []byte("foo")), ShouldBeNil)
+			So(db.Put(wo, []byte("foo3"), []byte("foo")), ShouldBeNil)
+			So(db.Put(wo, []byte("bar1"), []byte("bar")), ShouldBeNil)
+			So(db.Put(wo, []byte("bar2"), []byte("bar")), ShouldBeNil)
+			So(db.Put(wo, []byte("bar3"), []byte("bar")), ShouldBeNil)
 
-		ro := NewDefaultReadOptions()
+			ro := NewDefaultReadOptions()
 
-		it := db.NewIterator(ro)
-		defer it.Close()
-		numFound := 0
-		for it.Seek([]byte("bar")); it.Valid(); it.Next() {
-			numFound++
-		}
+			it := db.NewIterator(ro)
+			defer it.Close()
+			numFound := 0
+			for it.Seek([]byte("bar")); it.Valid(); it.Next() {
+				numFound++
+			}
 
-		So(it.Err(), ShouldBeNil)
-		So(numFound, ShouldEqual, 3)
+			So(it.Err(), ShouldBeNil)
+			So(numFound, ShouldEqual, 3)
+		})
+
+		Convey("Iteration without destroy first, reopen old db", func() {
+			options := NewDefaultOptions()
+			defer DestroyDb(dbName, options)
+
+			options.SetPrefixExtractor(sliceTransform)
+			options.SetHashSkipListRep(50000, 4, 4)
+			options.SetAllowMmapReads(true)
+			options.SetAllowMmapWrites(true)
+			options.SetPlainTableFactory(4, 10, 0.75, 16)
+			options.SetCreateIfMissing(true)
+
+			db, err := OpenDb(options, dbName)
+			defer db.Close()
+
+			So(err, ShouldBeNil)
+
+			ro := NewDefaultReadOptions()
+
+			it := db.NewIterator(ro)
+			defer it.Close()
+			numFound := 0
+			for it.Seek([]byte("bar")); it.Valid(); it.Next() {
+				numFound++
+			}
+
+			So(it.Err(), ShouldBeNil)
+			So(numFound, ShouldEqual, 3)
+		})
+
 	})
 }
 
