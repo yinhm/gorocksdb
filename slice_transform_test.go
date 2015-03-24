@@ -1,6 +1,7 @@
 package gorocksdb
 
 import (
+	"encoding/hex"
 	"log"
 	"os"
 	"testing"
@@ -16,10 +17,10 @@ var (
 )
 
 func setup() {
-	dbpath := os.TempDir() + "/TestSliceTransformInconsistency"
+	dbpath = os.TempDir() + "/TestFixedPrefixTransformWithMax"
 	transform := NewFixedPrefixTransform(3)
 
-	rdbOptions := NewDefaultOptions()
+	rdbOptions = NewDefaultOptions()
 	rdbOptions.SetPrefixExtractor(transform)
 	rdbOptions.SetWriteBufferSize(16 << 20) // 8MB
 	rdbOptions.SetTargetFileSizeBase(16 << 20)
@@ -34,18 +35,14 @@ func setup() {
 }
 
 func teardown() {
-	if !rdbClosed {
-		closeDB()
-		err := DestroyDb(dbpath, rdbOptions)
-		if err != nil {
-			log.Printf("fail on destroy rdb: %s", err)
-		}
-	}
+	rdb.Close()
 }
 
-func closeDB() {
-	rdb.Close()
-	rdbClosed = true
+func destroyDb() {
+	err := DestroyDb(dbpath, rdbOptions)
+	if err != nil {
+		log.Printf("fail on destroy rdb: %s", err)
+	}
 }
 
 type testSliceTransform struct {
@@ -188,17 +185,20 @@ func TestFixedPrefixTransform(t *testing.T) {
 }
 
 func TestFixedPrefixTransformWithMax(t *testing.T) {
-	setup()
-	defer teardown()
+	defer destroyDb()
 
-	Convey("Subject: Prefix filtering with custom slice transform", t, func() {
-		Convey("The old Iteration", func() {
+	Convey("Subject: fixed prefix transform seek", t, func() {
+		setup()
+		defer teardown()
+
+		maxKey := []byte{0xFF, 0xFF, 0xFF, 0xFF}
+		maxBarKey := []byte("bar")
+		maxBarKey = append(maxBarKey, maxKey...)
+
+		Convey("Block-based table seek all key >= prefix", func() {
 			wo := NewDefaultWriteOptions()
 
-			maxKey := []byte{
-				0xFF, 0xFF, 0xFF, 0xFF,
-			}
-			So(rdb.Put(wo, maxKey, []byte("")), ShouldBeNil)
+			So(rdb.Put(wo, maxBarKey, []byte("")), ShouldBeNil)
 
 			So(rdb.Put(wo, []byte("foo1"), []byte("foo")), ShouldBeNil)
 			So(rdb.Put(wo, []byte("foo2"), []byte("foo")), ShouldBeNil)
@@ -213,18 +213,16 @@ func TestFixedPrefixTransformWithMax(t *testing.T) {
 			defer it.Close()
 			numFound := 0
 			for it.Seek([]byte("bar")); it.Valid(); it.Next() {
+				key := it.Key()
+				defer key.Free()
+				log.Println("Found key:", hex.EncodeToString(key.Data()), string(key.Data()))
 				numFound++
 			}
-
 			So(it.Err(), ShouldBeNil)
-			So(numFound, ShouldEqual, 3)
+			So(numFound, ShouldEqual, 7)
 		})
 
-		Convey("Iteration without destroy first, reopen old db", func() {
-			// reopen
-			closeDB()
-			setup()
-
+		Convey("Block-based table seek are consistent after db reopen", func() {
 			ro := NewDefaultReadOptions()
 			it := rdb.NewIterator(ro)
 			defer it.Close()
@@ -232,29 +230,42 @@ func TestFixedPrefixTransformWithMax(t *testing.T) {
 			for it.Seek([]byte("bar")); it.Valid(); it.Next() {
 				numFound++
 			}
-
 			So(it.Err(), ShouldBeNil)
-			So(numFound, ShouldEqual, 3)
+			So(numFound, ShouldEqual, 7)
 		})
 
-		Convey("SeekToLast after reopen ", func() {
-			// reopen
-			closeDB()
-			setup()
-			defer teardown()
-
+		Convey("0xFF MAX DELIMITER: match prefix[0xFF...]", func() {
 			ro := NewDefaultReadOptions()
 			it := rdb.NewIterator(ro)
 			defer it.Close()
 			numFound := 0
-			it.Seek([]byte("bar"))
-			for it.SeekToLast(); it.Valid(); it.Prev() {
+
+			it.Seek(maxBarKey)
+			it.Prev()
+			for ; it.ValidForPrefix([]byte("bar")); it.Prev() {
 				key := it.Key()
 				defer key.Free()
-				// log.Println("Found key:", hex.EncodeToString(key.Data()))
+				log.Println("Found key:", string(key.Data()))
 				numFound++
 			}
+			So(it.Err(), ShouldBeNil)
+			So(numFound, ShouldEqual, 3)
+		})
 
+		Convey("SeekToLast if key matches foo", func() {
+			ro := NewDefaultReadOptions()
+			it := rdb.NewIterator(ro)
+			defer it.Close()
+			numFound := 0
+			it.Seek([]byte("foo"))
+			it.SeekToLast()
+			it.Prev()
+			for ; it.ValidForPrefix([]byte("foo")); it.Prev() {
+				key := it.Key()
+				defer key.Free()
+				// log.Println("Found key:", string(key.Data()))
+				numFound++
+			}
 			So(it.Err(), ShouldBeNil)
 			So(numFound, ShouldEqual, 3)
 		})
