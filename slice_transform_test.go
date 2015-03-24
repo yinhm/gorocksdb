@@ -21,11 +21,10 @@ func setup() {
 
 	rdbOptions := NewDefaultOptions()
 	rdbOptions.SetPrefixExtractor(transform)
-	rdbOptions.SetHashSkipListRep(50000, 4, 4)
-	rdbOptions.SetAllowMmapReads(true)
-	rdbOptions.SetAllowMmapWrites(true)
-	rdbOptions.SetPlainTableFactory(4, 10, 0.75, 16)
+	rdbOptions.SetWriteBufferSize(16 << 20) // 8MB
+	rdbOptions.SetTargetFileSizeBase(16 << 20)
 	rdbOptions.SetCreateIfMissing(true)
+	rdbOptions.SetBlockBasedTableFactory(NewDefaultBlockBasedTableOptions())
 
 	var err error
 	rdb, err = OpenDb(rdbOptions, dbpath)
@@ -250,6 +249,9 @@ func TestFixedPrefixTransformWithMax(t *testing.T) {
 			numFound := 0
 			it.Seek([]byte("bar"))
 			for it.SeekToLast(); it.Valid(); it.Prev() {
+				key := it.Key()
+				defer key.Free()
+				// log.Println("Found key:", hex.EncodeToString(key.Data()))
 				numFound++
 			}
 
